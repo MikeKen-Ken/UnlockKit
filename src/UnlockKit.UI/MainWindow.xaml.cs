@@ -20,8 +20,18 @@ public partial class MainWindow : Window
         Theme.Attach(this);
     }
 
-    private void BrowseFile(object sender, RoutedEventArgs e)
+    /// <summary>
+    /// One update check per launch, delayed so it never competes with the scan a
+    /// context-menu click starts. The result is silent unless something newer
+    /// exists, and even then the banner appears at most once a day.
+    /// </summary>
+    private async void OnLoaded(object sender, RoutedEventArgs e)
     {
+        await Task.Delay(TimeSpan.FromSeconds(2));
+        await _vm.CheckForUpdatesAsync(manual: false);
+    }
+
+    private void BrowseFile(object sender, RoutedEventArgs e)    {
         var dialog = new Microsoft.Win32.OpenFileDialog
         {
             CheckFileExists = true,

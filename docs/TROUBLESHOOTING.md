@@ -116,6 +116,24 @@ Windows 11 上这是预期行为。UnlockKit 写的是传统注册表菜单项�
 
 ---
 
+## 更新检查失败
+
+状态栏显示 `Check updates` 但日志里是 `GitHub is rate-limiting update checks from this machine` —— GitHub 的匿名 API 每个 IP 每小时只给 60 次。等一会儿再点。这不是 UnlockKit 的限制，也没法绕（要绕就得让每个用户配 token，不划算）。
+
+其它失败先看 `%LOCALAPPDATA%\UnlockKit\update.log`，它会记下每一次检查和下载的结果。完全离线、或者不想让它联网，设 `UNLOCKKIT_NO_UPDATE=1`。
+
+---
+
+## 点了「Restart and update」，窗口关了但版本没变
+
+替换是在进程退出之后做的，日志里应该有三行：`apply: staged ... -> ...`、`apply: replaced ... with x.y.z`，以及（失败时）`apply: could not replace`。
+
+- **`could not replace` / `access denied`**：程序被放在了普通用户写不进去的目录（`Program Files`、只读共享、被组策略锁住的路径）。把它挪到 `%LOCALAPPDATA%\Programs\UnlockKit\` 再更新，或者手动下载新版本覆盖。
+- **日志到最后一行就断了**：替换进程被杀软拦住了。单文件 exe 在替换瞬间是「自己写自己」，启发式规则容易误判；把 `%LOCALAPPDATA%\UnlockKit\` 加进排除列表。
+- **更新成功但菜单项还指向旧路径**：菜单存的是绝对路径。若程序位置变了，把 **Install context menu** 点两次（先移除再安装）。
+
+---
+
 ## 报 bug
 
 ```console

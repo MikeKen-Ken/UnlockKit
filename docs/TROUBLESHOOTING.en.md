@@ -165,6 +165,38 @@ becomes a dead link. Re-run the app and click **Install context menu** twice
 
 ---
 
+## The update check fails
+
+The status bar shows `Check updates` and the log says `GitHub is rate-limiting
+update checks from this machine` — GitHub's anonymous API allows 60 requests per
+hour per IP. Wait and click again. This is not a limit UnlockKit imposes, and
+there is no way around it short of making every user configure a token.
+
+For anything else, read `%LOCALAPPDATA%\UnlockKit\update.log` first; every check
+and download is recorded there. On an offline machine, or if you would rather it
+did not call out at all, set `UNLOCKKIT_NO_UPDATE=1`.
+
+---
+
+## "Restart and update" closed the window but the version did not change
+
+The swap happens after the process exits, and the log should show
+`apply: staged ... -> ...`, then `apply: replaced ... with x.y.z` — or
+`apply: could not replace` when it failed.
+
+- **`could not replace` / `access denied`**: the app lives somewhere a standard
+  user cannot write (`Program Files`, a read-only share, a policy-locked path).
+  Move it to `%LOCALAPPDATA%\Programs\UnlockKit\` and update again, or download
+  the new build by hand.
+- **The log stops at the `staged` line**: the helper process was blocked by
+  antivirus. A single-file exe writing over itself trips heuristic rules easily;
+  add `%LOCALAPPDATA%\UnlockKit\` to the exclusion list.
+- **Updated, but the context menu still points at the old path**: the verb stores
+  an absolute path. If the exe moved, click **Install context menu** twice
+  (remove, then install).
+
+---
+
 ## Reporting a bug
 
 ```console

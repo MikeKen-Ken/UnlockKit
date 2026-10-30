@@ -226,7 +226,83 @@ written to `HKCU\Software\UnlockKit\Theme` and stops the following; right-click
 on the switch to go back to *Follow Windows*. The choice lives in the registry
 rather than a config file because the app already owns a key there.
 
-## 9. Known trade-offs
+## 9. Self-update
+
+Updating raises exactly two real problems: **how to replace an exe that is
+currently holding itself open**, and **how to do it without becoming annoying**.
+
+### The new build performs the swap
+
+The obvious approach is a `.bat` or `.ps1` that waits, copies, and starts the
+new file. This does not use one, because Windows batch files are decoded using
+the console code page (GBK on a Simplified Chinese system), so a single
+non-ASCII path breaks the script — and `%LOCALAPPDATA%` *is* non-ASCII for a
+Chinese user name.
+
+Instead: **the old build launches the downloaded build and tells it whose seat
+to take.**
+
+```console
+UnlockKit-1.2.0.exe --apply-update "C:\...\Programs\UnlockKit\UnlockKit.exe" 17392
+```
+
+Started with that flag the new build opens no window, waits for pid 17392 to
+exit, copies itself over the target, and starts it. It is ordinary code in the
+same executable, so no script interpreter is involved and no path can be
+mangled.
+
+Details that have to be written this way:
+
+- **A running image cannot be opened for writing.** That is a hard Windows
+  rule, so "may I replace this?" cannot be tested by probing the exe — only a
+  sibling temp file in the same folder answers it. Getting this wrong classifies
+  every update as "folder not writable".
+- **The image stays locked for a moment after the process exits**, so the copy
+  runs in a loop of 40 attempts with a 250 ms pause. Failing on the first try
+  shows the user "update failed" for an operation that would have succeeded a
+  second later.
+- When the copy does fail, **the old build is started anyway.** A desktop where
+  the program vanished is worse than a failed update.
+- When the folder is not writable (`Program Files`, a read-only share), the
+  update lands in `%LOCALAPPDATA%\Programs\UnlockKit\` — which is where a tool
+  that runs as the user belongs anyway.
+
+### Nothing is executed before it is verified
+
+Each release ships `UnlockKit.exe.sha256` next to the binary; the hash is
+compared, then the `MZ` header and the version compiled into the file. All
+three have to pass before it is written to the staging folder. A release without
+a hash file still works — only the last two checks apply — but the current CI
+publishes hashes for every tag.
+
+### At most one reminder a day
+
+A check is a network request; a reminder is a claim on attention. They deserve
+different frequencies:
+
+| Event | Frequency | Why |
+| --- | --- | --- |
+| Check (and download) | once per launch | The request is tiny; the download is invisible |
+| Reminder (banner) | at most once per version per day | Something already declined today should not be asked again today |
+| Manual check | unlimited | The user asked, so it is not an interruption |
+
+The date is stored in `HKCU\Software\UnlockKit\Update.Prompted` (`yyyy-MM-dd`)
+and skips in `Update.Skipped` (a version). The comparison is "skipped version >=
+this release", so skipping one version does not mute the next one.
+
+A skipped version is **not downloaded** by the automatic check either — if the
+user said no, 68 MB of traffic is not justified. Manual checks ignore that,
+otherwise the button would be a dead end.
+
+### Staging
+
+Downloads land in `%LOCALAPPDATA%\UnlockKit\updates\UnlockKit-<version>.exe`.
+The version is in the name, so the next launch reuses the file instead of
+pulling 68 MB again. Startup deletes everything at or below the running version:
+after a successful update that is exactly the copy that was just installed, and
+leftover `.part` fragments go with it.
+
+## 10. Known trade-offs
 
 | Trade-off | Why it is accepted |
 | --- | --- |
@@ -235,3 +311,5 @@ rather than a config file because the app already owns a key there.
 | No ACL repair | Silently rewriting permissions on a user's files is a bigger change than the problem it solves; the diagnosis names the cause instead |
 | No kernel driver | User-mode only means no signing, no BSOD risk, and no antivirus fight — at the cost of never beating a minifilter |
 | Legacy registry verbs on Windows 11 | Sitting under *Show more options* is the price of not shipping an MSIX package |
+| Update swaps files instead of using an installer | No installer framework, service or MSIX; the cost is no rollback — a failed swap leaves the old build running |
+| Update verifies a hash, not a signature | There is no code-signing certificate to check against; a hash proves "this matches the release page", not "who published it" |

@@ -98,13 +98,31 @@ jobs:
                            -DestinationPath "dist/UnlockKit-cli-${{ steps.version.outputs.value }}-win-x64.zip" `
                            -Force
 
+      # The in-app updater fetches <asset>.sha256 and refuses a download whose
+      # hash does not match, so every release has to carry these.
+      - name: Checksums
+        shell: pwsh
+        run: |
+          $files = @(
+            "dist/gui/UnlockKit.exe",
+            "dist/UnlockKit-cli-${{ steps.version.outputs.value }}-win-x64.zip"
+          )
+          foreach ($f in $files) {
+            $hash = (Get-FileHash $f -Algorithm SHA256).Hash.ToLower()
+            $name = Split-Path $f -Leaf
+            "$hash  $name" | Out-File -FilePath "$f.sha256" -Encoding ascii -NoNewline
+            Write-Host "$name  $hash"
+          }
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v5
         with:
           name: UnlockKit-${{ steps.version.outputs.value }}-win-x64
           path: |
             dist/gui/UnlockKit.exe
+            dist/gui/UnlockKit.exe.sha256
             dist/UnlockKit-cli-*-win-x64.zip
+            dist/UnlockKit-cli-*-win-x64.zip.sha256
           if-no-files-found: error
           retention-days: 30
 
@@ -116,14 +134,16 @@ jobs:
         run: |
           $tag = "${{ github.ref_name }}"
           $gui = "dist/gui/UnlockKit.exe"
+          $guiSha = "dist/gui/UnlockKit.exe.sha256"
           $zip = "dist/UnlockKit-cli-${{ steps.version.outputs.value }}-win-x64.zip"
+          $zipSha = "$zip.sha256"
 
           # Re-running a failed workflow must not fail on the existing release.
           gh release view $tag 2>$null | Out-Null
           if ($LASTEXITCODE -eq 0) {
-            gh release upload $tag $gui $zip --clobber
+            gh release upload $tag $gui $guiSha $zip $zipSha --clobber
           } else {
-            gh release create $tag $gui $zip `
+            gh release create $tag $gui $guiSha $zip $zipSha `
               --title "UnlockKit $tag" `
               --generate-notes
           }

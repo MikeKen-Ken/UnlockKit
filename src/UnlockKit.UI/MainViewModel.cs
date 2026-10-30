@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.IO;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Input;
@@ -28,6 +29,10 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public ICommand ThemeLightCommand { get; }
     public ICommand ThemeDarkCommand { get; }
     public ICommand ThemeSystemCommand { get; }
+    public ICommand UpdateCommand { get; }
+    public ICommand UpdateInstallCommand { get; }
+    public ICommand UpdateLaterCommand { get; }
+    public ICommand UpdateSkipCommand { get; }
 
     private string _targetPath = "";
     private string _verdict = "Pick a file or folder, then click Scan";
@@ -36,6 +41,13 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private string _logText = "";
     private bool _isBusy;
     private bool _menuInstalled;
+
+    private UpdatePhase _updatePhase = UpdatePhase.Idle;
+    private ReleaseInfo? _pendingUpdate;
+    private string? _stagedUpdate;
+    private long _stagedSize;
+    private double _updateProgress;
+    private bool _updateBanner;
 
     public MainViewModel()
     {
@@ -51,6 +63,11 @@ public sealed class MainViewModel : INotifyPropertyChanged
         ThemeLightCommand = new RelayCommand(() => Theme.Set(ThemeKind.Light));
         ThemeDarkCommand = new RelayCommand(() => Theme.Set(ThemeKind.Dark));
         ThemeSystemCommand = new RelayCommand(() => Theme.Set(ThemeKind.System));
+
+        UpdateCommand = new RelayCommand(async () => await OnUpdatePillAsync(), () => !IsUpdating);
+        UpdateInstallCommand = new RelayCommand(InstallUpdate, () => _updatePhase == UpdatePhase.Ready);
+        UpdateLaterCommand = new RelayCommand(() => { _updateBanner = false; RefreshUpdate(); });
+        UpdateSkipCommand = new RelayCommand(SkipUpdate, () => _pendingUpdate is not null);
 
         // A theme swap replaces the brush objects, so anything the view model
         // cached has to be re-announced.
@@ -135,6 +152,197 @@ public sealed class MainViewModel : INotifyPropertyChanged
         ThemeKind.Dark => "Dark theme — click to switch to light",
         _ => "Light theme — click to switch to dark",
     };
+
+    // ── updates ──────────────────────────────────────────────────────────────
+
+    private bool IsUpdating => _updatePhase is UpdatePhase.Checking or UpdatePhase.Downloading;
+
+    /// <summary>Short caption for the status-bar pill; it is also the manual entry point.</summary>
+    public string UpdateLabel => _updatePhase switch
+    {
+        UpdatePhase.Checking => "Checking…",
+        UpdatePhase.Downloading => $"Downloading {_updateProgress * 100:0}%",
+        UpdatePhase.Ready => $"Update {_pendingUpdate?.Display}",
+        UpdatePhase.Current => "Up to date",
+        _ => "Check updates",
+    };
+
+    // Segoe MDL2: E72C refresh, E896 download, E73E check mark, E7BA warning.
+    public string UpdateGlyph => _updatePhase switch
+    {
+        UpdatePhase.Downloading or UpdatePhase.Ready => "\uE896",
+        UpdatePhase.Current => "\uE73E",
+        UpdatePhase.Failed => "\uE7BA",
+        _ => "\uE72C",
+    };
+
+    public string UpdateTip => _updatePhase switch
+    {
+        UpdatePhase.Checking => $"Looking for a newer release (you have {UpdateService.CurrentVersionText})",
+        UpdatePhase.Downloading => $"Downloading UnlockKit {_pendingUpdate?.Display}…",
+        UpdatePhase.Ready => $"UnlockKit {_pendingUpdate?.Display} is downloaded — click to restart and install",
+        UpdatePhase.Current => $"You are on the latest version ({UpdateService.CurrentVersionText})",
+        UpdatePhase.Failed => "The last check did not complete — click to try again",
+        _ => $"Check GitHub for a newer version (you have {UpdateService.CurrentVersionText})",
+    };
+
+    public bool UpdateBannerVisible => _updateBanner;
+
+    public string UpdateHeadline => _pendingUpdate is null
+        ? "An update is available"
+        : $"UnlockKit {_pendingUpdate.Display} is ready";
+
+    public string UpdateDetail => _stagedSize > 0
+        ? $"{_stagedSize / 1048576.0:0} MB downloaded — restart to install."
+        : "Downloaded — restart to install.";
+
+    /// <summary>Release notes as the tooltip on the banner, so the decision is informed.</summary>
+    public string UpdateNotes => string.IsNullOrWhiteSpace(_pendingUpdate?.Notes)
+        ? "No release notes published."
+        : _pendingUpdate!.Notes.Trim();
+
+    private async Task OnUpdatePillAsync()
+    {
+        if (_updatePhase == UpdatePhase.Ready)
+        {
+            InstallUpdate();
+            return;
+        }
+
+        await CheckForUpdatesAsync(manual: true);
+    }
+
+    /// <summary>
+    /// Called once per launch with manual: false. Downloads silently, then shows
+    /// the banner at most once a day per version (see UpdateService.ShouldPrompt).
+    /// </summary>
+    public async Task CheckForUpdatesAsync(bool manual)
+    {
+        if (IsUpdating) return;
+
+        // Opt-out for offline machines and locked-down environments. Manual
+        // checks still work, so the button never becomes a dead end.
+        if (!manual && UpdateService.IsDisabled)
+        {
+            Log("Update check skipped - UNLOCKKIT_NO_UPDATE=1");
+            return;
+        }
+
+        var previous = _updatePhase;
+        _updatePhase = UpdatePhase.Checking;
+        RefreshUpdate();
+
+        try
+        {
+            var check = await UpdateService.CheckAsync();
+
+            if (check is null || !check.IsNewer)
+            {
+                _updatePhase = UpdatePhase.Current;
+                Log($"Update check: {UpdateService.CurrentVersionText} is the latest version");
+                return;
+            }
+
+            _pendingUpdate = check.Release;
+
+            if (!manual && UpdateService.IsSkipped(check.Release.Version))
+            {
+                Log($"Update {check.Release.Display} is available but skipped");
+                _updatePhase = UpdatePhase.Idle;
+                return;
+            }
+
+            _updatePhase = UpdatePhase.Downloading;
+            _updateProgress = 0;
+            RefreshUpdate();
+            Log($"Update {check.Release.Display} found - downloading in the background");
+
+            var progress = new Progress<double>(value =>
+            {
+                _updateProgress = value;
+                RefreshUpdate();
+            });
+
+            _stagedUpdate = await UpdateService.DownloadAsync(check.Release, progress);
+            _stagedSize = new FileInfo(_stagedUpdate).Length;
+            _updatePhase = UpdatePhase.Ready;
+            Log($"Update {check.Release.Display} ready ({_stagedSize / 1048576.0:0.0} MB)");
+
+            // The daily limit applies to being told, not to being downloaded:
+            // the pill stays clickable either way.
+            if (manual || UpdateService.ShouldPrompt(check.Release.Version))
+            {
+                if (!manual) UpdateService.MarkPrompted();
+                _updateBanner = true;
+                Log($"Restart to install {check.Release.Display}");
+            }
+        }
+        catch (Exception ex)
+        {
+            var reason = UpdateService.Explain(ex);
+            _updatePhase = previous == UpdatePhase.Ready ? UpdatePhase.Ready : UpdatePhase.Failed;
+            UpdateService.Log("check failed: " + ex.Message);
+            Log("Update check failed: " + reason);
+
+            if (manual)
+                MessageBox.Show(
+                    $"{reason}\n\nThe app works offline; try again later.",
+                    "Update check", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        finally
+        {
+            RefreshUpdate();
+        }
+    }
+
+    private void InstallUpdate()
+    {
+        if (_stagedUpdate is not { } staged || _pendingUpdate is not { } release) return;
+
+        var answer = MessageBox.Show(
+            $"Restart UnlockKit to install {release.Display}?\n\nThe window closes and reopens on the new version.",
+            "Install update", MessageBoxButton.OKCancel, MessageBoxImage.Question);
+
+        if (answer != MessageBoxResult.OK) return;
+
+        try
+        {
+            UpdateService.StartApply(staged, UpdateService.UpdateTarget(), Environment.ProcessId);
+            Application.Current.Shutdown();
+        }
+        catch (Exception ex)
+        {
+            Log("Update failed: " + ex.Message);
+            MessageBox.Show(ex.Message, "Update failed", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private void SkipUpdate()
+    {
+        if (_pendingUpdate is { } release)
+        {
+            UpdateService.Skip(release.Version);
+            Log($"Update {release.Display} skipped - a later release will prompt again");
+        }
+
+        _updateBanner = false;
+        RefreshUpdate();
+    }
+
+    private void RefreshUpdate()
+    {
+        OnChanged(nameof(UpdateLabel));
+        OnChanged(nameof(UpdateGlyph));
+        OnChanged(nameof(UpdateTip));
+        OnChanged(nameof(UpdateBannerVisible));
+        OnChanged(nameof(UpdateHeadline));
+        OnChanged(nameof(UpdateDetail));
+        OnChanged(nameof(UpdateNotes));
+
+        (UpdateCommand as RelayCommand)?.RaiseCanExecuteChanged();
+        (UpdateInstallCommand as RelayCommand)?.RaiseCanExecuteChanged();
+        (UpdateSkipCommand as RelayCommand)?.RaiseCanExecuteChanged();
+    }
 
     private void SetVerdict(string text, string level)
     {
@@ -439,8 +647,17 @@ public sealed class MainViewModel : INotifyPropertyChanged
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 }
 
-public sealed class RelayCommand : ICommand
+public enum UpdatePhase
 {
+    Idle,
+    Checking,
+    Downloading,
+    Ready,
+    Current,
+    Failed,
+}
+
+public sealed class RelayCommand : ICommand{
     private readonly Func<Task>? _asyncExecute;
     private readonly Action? _execute;
     private readonly Func<bool>? _canExecute;

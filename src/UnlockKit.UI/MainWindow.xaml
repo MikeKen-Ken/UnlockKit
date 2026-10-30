@@ -6,6 +6,7 @@
         Icon="Assets/unlockkit.ico"
         Background="{DynamicResource Window.Background}"
         Foreground="{DynamicResource Text}"
+        Loaded="OnLoaded"
         FontFamily="Segoe UI Variable Text, Segoe UI" FontSize="13">
 
     <!-- No styles here: Themes/Controls.xaml owns them all, which is what lets
@@ -16,6 +17,7 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="118"/>
@@ -90,14 +92,41 @@
                     Style="{StaticResource Btn}" DockPanel.Dock="Right"/>
         </DockPanel>
 
+        <!-- update banner: only shown when a download finished and the daily
+             reminder has not been used yet -->
+        <Border Grid.Row="5" Background="{DynamicResource Surface}"
+                BorderBrush="{DynamicResource Border}" BorderThickness="1"
+                CornerRadius="6" Padding="12,9" Margin="0,10,0,0"
+                ToolTip="{Binding UpdateNotes}"
+                Visibility="{Binding UpdateBannerVisible, Converter={StaticResource BoolToVis}}">
+            <DockPanel>
+                <Border DockPanel.Dock="Left" Width="4" CornerRadius="2"
+                        Background="{DynamicResource Accent}" Margin="0,0,10,0"/>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button Content="Restart and update" Command="{Binding UpdateInstallCommand}"
+                            Style="{StaticResource BtnPrimary}" Margin="10,0,0,0"/>
+                    <Button Content="Later" Command="{Binding UpdateLaterCommand}"
+                            Style="{StaticResource Btn}" Margin="8,0,0,0"/>
+                    <Button Content="Skip" Command="{Binding UpdateSkipCommand}"
+                            Style="{StaticResource BtnGhost}" Margin="6,0,0,0"
+                            ToolTip="Never prompt for this version again"/>
+                </StackPanel>
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="{Binding UpdateHeadline}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                    <TextBlock Text="{Binding UpdateDetail}" Foreground="{DynamicResource Text.Muted}"
+                               TextWrapping="Wrap" Margin="0,2,0,0"/>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
         <!-- log -->
-        <TextBox Grid.Row="5" Margin="0,10,0,0" IsReadOnly="True"
+        <TextBox Grid.Row="6" Margin="0,10,0,0" IsReadOnly="True"
                  Text="{Binding LogText, Mode=OneWay}" FontFamily="Cascadia Mono, Consolas" FontSize="11"
                  Style="{StaticResource Input}" TextWrapping="Wrap"
                  VerticalScrollBarVisibility="Auto"/>
 
         <!-- status bar -->
-        <DockPanel Grid.Row="6" Margin="0,8,0,0">
+        <DockPanel Grid.Row="7" Margin="0,8,0,0">
             <Button DockPanel.Dock="Right" Style="{StaticResource BtnGhost}" Margin="10,0,0,0"
                     Command="{Binding ThemeCommand}" ToolTip="{Binding ThemeTip}">
                 <Button.ContextMenu>
@@ -114,6 +143,17 @@
                                FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
                                FontSize="13" VerticalAlignment="Center"/>
                     <TextBlock Text="{Binding ThemeLabel}" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Button>
+
+            <!-- manual update entry point; doubles as the download progress readout -->
+            <Button DockPanel.Dock="Right" Style="{StaticResource BtnGhost}" Margin="10,0,0,0"
+                    Command="{Binding UpdateCommand}" ToolTip="{Binding UpdateTip}">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="{Binding UpdateGlyph}" Margin="0,0,6,0"
+                               FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                               FontSize="13" VerticalAlignment="Center"/>
+                    <TextBlock Text="{Binding UpdateLabel}" VerticalAlignment="Center"/>
                 </StackPanel>
             </Button>
 

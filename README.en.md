@@ -53,6 +53,7 @@ UnlockKit answers with a diagnosis first. It enumerates every open handle in the
 - **Schedules the delete for next boot** through `PendingFileRenameOperations` when the lock genuinely can't be broken from user mode.
 - **Right-click integration** — one `UnlockKit` entry with `Unlock` and `Delete` children, icons included, installed per-user so it never needs elevation.
 - **Light and dark themes** — follows Windows on first run, one click in the bottom-right corner to switch, right-click that switch for *Follow Windows*. The choice is stored in `HKCU\Software\UnlockKit`, and the title bar goes dark too, so there is no white frame around a black window.
+- **Self-update** — one background check per launch, automatic download, at most one reminder a day; the pill in the status bar checks on demand, and `--update` does the whole thing headlessly.
 
 ## Install
 
@@ -66,6 +67,27 @@ Then either:
 > **Windows 11 note:** this is a classic registry verb, so it appears under **Show more options** (or `Shift+F10`). Getting into the top-level menu requires an MSIX-packaged `IExplorerCommand` with app identity — that is a shell policy, not something a registry key can opt out of, and it isn't worth the packaging side effects for a utility like this.
 
 > **Unsigned binary:** there is no code-signing certificate, so SmartScreen will say *"Windows protected your PC"* the first time you run it. *More info → Run anyway*, or build it yourself from the two commands at the bottom of this page.
+
+## Updates
+
+The app updates itself, so you do not have to watch the Releases page.
+
+- **One check per launch**, in the background, about 2 seconds after the window appears. A newer release is **downloaded automatically** (~68 MB, straight from `api.github.com` — no update server of ours in the middle).
+- **At most one reminder a day.** When the download finishes a banner appears: *UnlockKit x.y.z is ready* with `Restart and update` / `Later` / `Skip`. `Later` silences it until tomorrow; `Skip` silences that version for good (a later release will still prompt).
+- **Manual any time.** The `Check updates` pill in the status bar is the entry point: it checks, shows a percentage while downloading, and becomes `Update x.y.z` when ready. Click it to install.
+- **After `Restart and update`** the window closes, the exe is replaced, and the new version starts — about two seconds.
+
+Where it lands: the new build replaces **the exe you are running**. If that folder is not writable (say you put it in `Program Files`), the update goes to `%LOCALAPPDATA%\Programs\UnlockKit\` instead of failing with a permission error.
+
+Three checks before anything is run: `SHA256` (every release ships a `.sha256` asset), the `MZ` header, and the version compiled into the binary. Any mismatch and the download is thrown away.
+
+Do not want it phoning home? Set `UNLOCKKIT_NO_UPDATE=1` and the automatic check is skipped (manual checks still work). To force an update from a script:
+
+```console
+UnlockKit.exe --update     # check + download + replace + relaunch, no window; exit 0 on success, 1 on failure
+```
+
+The log is `%LOCALAPPDATA%\UnlockKit\update.log` — read that first if an update fails.
 
 ## Quick start
 
