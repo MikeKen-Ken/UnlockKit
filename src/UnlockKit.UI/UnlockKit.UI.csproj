@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <!-- The shipped product name: single-file publish drops UnlockKit.exe. -->
+    <AssemblyName>UnlockKit</AssemblyName>
+    <RootNamespace>UnlockKit.UI</RootNamespace>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <ApplicationIcon>Assets\unlockkit.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <Version>1.0.0</Version>
+    <Product>UnlockKit</Product>
+    <Description>Diagnose and force-delete files locked by other processes on Windows.</Description>
+    <Company>UnlockKit contributors</Company>
+    <RepositoryUrl>https://github.com/MikeKen-Ken/UnlockKit</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\unlockkit.ico" />
+    <Resource Include="Assets\unlock.ico" />
+    <Resource Include="Assets\delete.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\UnlockKit\UnlockKit.csproj" />
+  </ItemGroup>
+
+  <!-- The engine is an Exe, so its runtimeconfig.json gets copied next to the
+       GUI. The GUI never reads it; keep the release folder to one file. -->
+  <Target Name="DropEngineRuntimeConfig" AfterTargets="Build;Publish">
+    <Delete Files="$(OutDir)unlockkit-cli.runtimeconfig.json" ContinueOnError="true" />
+    <Delete Files="$(PublishDir)unlockkit-cli.runtimeconfig.json" ContinueOnError="true" />
+  </Target>
+
+</Project>

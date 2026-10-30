@@ -1,0 +1,16 @@
+# Build output
+bin/
+obj/
+dist/
+publish/
+
+# Visual Studio / Rider
+.vs/
+.idea/
+*.user
+*.suo
+*.DotSettings.user
+
+# Test artefacts
+*.log
+*.tmp
