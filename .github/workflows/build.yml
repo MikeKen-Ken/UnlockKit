@@ -10,6 +10,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   DOTNET_NOLOGO: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
@@ -22,10 +26,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '9.0.x'
 
@@ -79,9 +83,13 @@ jobs:
             $mb = [math]::Round((Get-Item $f).Length / 1MB, 1)
             Write-Host "$f  $mb MB"
           }
-          # smoke test: the CLI must at least answer --help
-          & $cli --help | Out-Null
-          if ($LASTEXITCODE -ne 2) { throw "unexpected exit code from --help: $LASTEXITCODE" }
+
+          # Smoke test: the CLI must at least answer --help. It exits 2 by design,
+          # so assert on the text rather than the status code.
+          $help = (& $cli --help 2>&1 | Out-String)
+          if ($help -notmatch 'usage:') { throw "CLI --help printed no usage text" }
+          Write-Host "CLI smoke test passed"
+          exit 0
 
       - name: Package CLI
         shell: pwsh
