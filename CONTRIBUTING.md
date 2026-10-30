@@ -44,4 +44,5 @@ and is how the current behaviour was validated.
 - New `Native` imports need the exact calling convention and `CharSet` spelled
   out; `CharSet.Ansi` on a `CreateFileW` call silently truncates paths at the
   first non-ASCII character.
-- If you change a verdict string, update `docs/TROUBLESHOOTING.md` with it.
+- If you change a verdict string, update `docs/TROUBLESHOOTING.md` and its
+  `docs/TROUBLESHOOTING.en.md` counterpart — the docs quote the verdicts verbatim.

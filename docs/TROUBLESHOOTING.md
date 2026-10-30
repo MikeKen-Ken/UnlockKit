@@ -1,180 +1,132 @@
-# Troubleshooting
+**简体中文** · [English](TROUBLESHOOTING.en.md)
 
-Organised by the error you are seeing. If your case is not here, run
+# 排查手册
+
+按你看到的报错组织。如果这里没有你的情况，先跑：
 
 ```console
 unlockkit-cli "path\to\thing" --json -v
 ```
 
-and include the output in the issue. Add `UNLOCKKIT_DEBUG=1` to the environment
-for the scanner's internal counters.
+把输出贴进 issue。再加一个环境变量 `UNLOCKKIT_DEBUG=1`，可以看到扫描器的内部计数。
 
 ---
 
-## "The action can't be completed because the folder or a file in it is open in another program"
+## 「操作无法完成，因为文件夹或其中的文件已在另一个程序中打开」
 
-This is `ERROR_SHARING_VIOLATION` (`0x20`, or `0x80070020` from `robocopy`,
-`.NET`, PowerShell).
+这就是 `ERROR_SHARING_VIOLATION`（`0x20`，在 `robocopy`、.NET、PowerShell 里通常显示为 `0x80070020`）。
 
-Something has the object open and did not pass `FILE_SHARE_DELETE`. UnlockKit
-reports this as `LOCKED`, names the process, and closing the handles is usually
-enough.
+有东西开着这个对象，而且没有传 `FILE_SHARE_DELETE`。UnlockKit 会把它判为 `LOCKED`，指出是哪个进程，通常关掉句柄就够了。
 
-**If the folder is the target**, the holder is almost never the folder itself.
-It is a file or subdirectory inside it, which is why UnlockKit reports
-`LOCKED (subtree)` and lists the specific paths. Deleting the folder means
-deleting those children, so their locks are your problem even though the folder
-object looks free.
+**如果目标是文件夹**，持有者几乎从来不是文件夹本身，而是里面的某个文件或子目录 —— 所以 UnlockKit 报 `LOCKED (subtree)` 并列出具体路径。删文件夹意味着删掉里面的东西，所以它们的锁就是你的问题，哪怕文件夹对象看起来是空闲的。
 
-Two outcomes are common after `Unlock`:
+点 `Unlock` 之后常见两种结果：
 
-- **The handles come back.** A watcher re-opened them within milliseconds. This
-  is expected for `TSVNCache.exe`, `SearchIndexer.exe`, `OneDrive.exe`,
-  `Dropbox.exe`, and antivirus. Use `Delete` rather than `Unlock` — the tree
-  delete closes the whole subtree once and then works faster than the watcher can
-  relock. If that still fails, fix the watcher (see below).
-- **Nothing was closeable.** Every handle was refused or unreadable. Refused
-  means a deny-listed or PPL-protected process; unreadable means you need to run
-  elevated. The report distinguishes the two.
+- **句柄又回来了。** 监视器在毫秒内重新打开了它们。对 `TSVNCache.exe`、`SearchIndexer.exe`、`OneDrive.exe`、`Dropbox.exe` 和杀毒软件来说这是预期行为。这种情况不要用 `Unlock`，用 `Delete` —— 树删除会一次性关掉整棵子树，然后比监视器重新锁定更快地删完。如果还是失败，去治监视器（见下文）。
+- **一个都关不掉。** 所有句柄都被拒绝或读不到。「拒绝」意味着是拒绝名单或 PPL 进程；「读不到」意味着你需要提权。报告会把这两种情况分开。
 
 ---
 
-## "Access is denied" / "You need permission to perform this action"
+## 「拒绝访问」/「你需要权限来执行此操作」
 
-`ERROR_ACCESS_DENIED` (`0x5`, `0x80070005`).
+`ERROR_ACCESS_DENIED`（`0x5`，`0x80070005`）。
 
-UnlockKit reports this as `ACL BLOCKS DELETE` when no handle holds the file. That
-verdict means exactly what it says: **this is not a lock**, and no unlocker can
-help. The account lacks the `DELETE` right on the object or on one of its parent
-directories.
+当没有任何句柄持有该文件时，UnlockKit 会报 `ACL BLOCKS DELETE`。这个结论的意思就是字面意思：**这不是锁**，任何解锁工具都帮不上。当前账户缺的是对象上（或某一级父目录上）的 `DELETE` 权限。
 
-Check first that it is not simply a read-only or system attribute, then look at
-the ACL:
+先确认它不是只读或系统属性那么简单，然后看 ACL：
 
 ```console
 icacls "D:\path\to\thing"
 ```
 
-Fixing this means taking ownership and granting yourself `DELETE`, which changes
-the security of the file. UnlockKit deliberately does not do that silently —
-taking ownership of a file you did not intend to touch is a worse outcome than a
-failed delete.
+要修就得夺取所有权并给自己授 `DELETE`，这会改变文件的安全设置。UnlockKit 故意不偷偷做这件事 —— 夺取了一个你本来没打算动的文件的所有权，比删除失败更糟糕。
 
 ---
 
-## It says `KERNEL-HELD LOCK` — a filter driver holds it
+## 报 `KERNEL-HELD LOCK` —— 过滤驱动持有
 
-`ERROR_SHARING_VIOLATION` with **zero** user-mode handles pointing at the target.
+`ERROR_SHARING_VIOLATION`，但指向目标的用户态句柄是**零**。
 
-This means the lock lives in a kernel filter driver (minifilter): antivirus,
-backup agent, endpoint security, cloud sync, or a filesystem filter. User-mode
-code cannot close those handles — not this tool, not any other. Any tool claiming
-otherwise is either installing a driver of its own, or lying.
+意思是这把锁在内核过滤驱动（minifilter）里：杀毒、备份代理、终端安全、云同步，或者某个文件系统过滤驱动。用户态代码关不掉那些句柄 —— 不是这个工具，也不是别的工具。任何声称能做到的，要么自己装了驱动，要么在骗你。
 
-What actually works:
+真正有效的手段：
 
-1. **Pause the culprit.** Antivirus real-time protection, OneDrive/Dropbox sync,
-   backup jobs.
-2. `unlockkit-cli delete "path" --reboot` — registers the path in
-   `PendingFileRenameOperations`, and `SMSS` deletes it before any user-mode code
-   runs at the next boot.
-3. Reboot, delete manually, then find the exclusions list.
+1. **暂停元凶。** 杀毒实时防护、OneDrive/Dropbox 同步、备份任务。
+2. `unlockkit-cli delete "path" --reboot` —— 把路径写进 `PendingFileRenameOperations`，下次开机的 `SMSS` 阶段、任何用户态代码运行之前把它删掉。
+3. 重启，手动删，然后去配排除列表。
 
-Identifying the driver: in the dialog that names no process, check
-`fltmc filters` for installed minifilters, and the driver list of your security
-product.
+定位驱动：如果对话框里根本不提任何进程，用 `fltmc filters` 看装了哪些 minifilter，再看安全产品的驱动清单。
 
 ---
 
-## `STATUS_CANNOT_DELETE` — the file is a running program
+## `STATUS_CANNOT_DELETE` —— 文件是正在运行的程序
 
-You are trying to delete an `.exe` or `.dll` that is currently mapped as an image
-section. Windows refuses, and it is right to: deleting the backing file of a
-running image is undefined behaviour. `Cannot delete: file is mapped as an image
-section (running exe/dll)`.
+你在删一个当前被映射为映像节的 `.exe` 或 `.dll`。Windows 会拒绝，而且拒绝得对：删掉运行中映像的载体文件是未定义行为。报告里写作 `Cannot delete: file is mapped as an image section (running exe/dll)`。
 
-Stop the process first. If it is a service, stop the service. If it is loaded into
-`explorer.exe` (a shell extension), the file stays mapped until Explorer restarts.
+先停掉进程。如果是服务，先停服务。如果是被加载进 `explorer.exe` 的（比如一个 shell 扩展），那这个文件要等资源管理器重启才会解除映射。
 
 ---
 
-## "Unlock" reports refusals — `PPL-protected (level 0x..)`
+## `Unlock` 报 `PPL-protected (level 0x..)`
 
-Protected Process Light. `MsMpEng.exe` (Defender), `services.exe`, `lsass.exe`,
-`csrss.exe` and friends cannot be opened even with `SeDebugPrivilege`. UnlockKit
-prints the protection level so the refusal is explainable rather than mysterious.
+受保护进程（Protected Process Light）。`MsMpEng.exe`（Defender）、`services.exe`、`lsass.exe`、`csrss.exe` 这些，即使有 `SeDebugPrivilege` 也打不开。UnlockKit 会把保护级别打出来，让这次拒绝是有解释的，而不是莫名其妙的。
 
-This is not a bug to be fixed. Closing handles in `csrss` or `winlogon` can stop
-the desktop from responding; the deny-list exists for that reason.
+这不是待修的 bug。在 `csrss` 或 `winlogon` 里关句柄，可能让桌面直接失去响应；拒绝名单存在的理由就是这个。
 
 ---
 
-## It was fine before, now it comes back every time — watcher processes
+## 删掉又回来、每次都这样 —— 监视器进程
 
-A process that watches a directory (version-control icon overlays, search
-indexers, sync clients) re-opens handles continuously. Closing them is treating
-the symptom. The durable fix is to stop the watcher from watching that path.
+会盯着目录的进程（版本控制的图标覆盖、搜索索引、同步客户端）会持续重新打开句柄。关掉它们只是治症状，根治办法是让它别再盯这个路径。
 
-| Process | Durable fix |
+| 进程 | 根治办法 |
 | --- | --- |
-| `TSVNCache.exe` (TortoiseSVN) | Settings → Icon Overlays → **Exclude paths** → add the folder. Status cache is the other half — set it to *none* or *shell* |
-| `TGitCache.exe` (TortoiseGit) | Same dialog, same exclusion list |
-| `SearchIndexer.exe` | Indexing Options → Modify → uncheck the folder |
-| `OneDrive.exe` | Settings → Account → Choose folders, or pause syncing |
-| `Dropbox.exe` / `GoogleDriveFS.exe` | Selective sync — remove the folder from sync |
-| Antivirus | Add the folder to real-time scan exclusions |
-| `explorer.exe` | Usually a thumbnail or preview handler: switch the folder view to *Details*, or clear the thumbnail cache |
+| `TSVNCache.exe`（TortoiseSVN） | 设置 → 图标覆盖 → **排除路径** → 加上这个文件夹。另一半是状态缓存，设为 *none* 或 *shell* |
+| `TGitCache.exe`（TortoiseGit） | 同一个对话框、同一个排除列表 |
+| `SearchIndexer.exe` | 索引选项 → 修改 → 取消勾选该文件夹 |
+| `OneDrive.exe` | 设置 → 账户 → 选择文件夹，或暂停同步 |
+| `Dropbox.exe` / `GoogleDriveFS.exe` | 选择性同步 —— 把这个文件夹移出同步 |
+| 杀毒软件 | 把该文件夹加进实时扫描排除项 |
+| `explorer.exe` | 通常是缩略图或预览处理器：把视图切成「详细信息」，或者清一次缩略图缓存 |
 
-`unlockkit-cli close "path"` on such a folder will report handles closed and then
-the same process holding them again a second later. That is the signature.
-
----
-
-## `NOT LOCKED` but the delete still fails
-
-The scanner found no handle and `DELETE` was granted, yet the delete failed. The
-usual causes:
-
-- **Path length.** Over `MAX_PATH` (260) without the `\\?\` prefix. UnlockKit
-  uses the extended-length form internally, but the caller may not.
-- **A parent directory is the problem**, not the file: read-only, ACL, or a
-  reparse point. Delete fails on the parent while reporting the child.
-- **The target moved** between scan and delete. Re-run.
-- **A filter driver** that fails the delete instead of blocking the open — this
-  shows up as an unexpected `NTSTATUS` and is worth reporting with `--json -v`.
+对这样的文件夹跑 `unlockkit-cli close "path"`，会报告关掉了若干句柄，然后一秒后同一个进程又占住了。这就是它的特征。
 
 ---
 
-## The right-click entry appears under "Show more options"
+## 报 `NOT LOCKED`，但就是删不掉
 
-Expected on Windows 11. UnlockKit writes a classic registry verb; the top-level
-Windows 11 menu only accepts MSIX-packaged `IExplorerCommand` handlers with app
-identity. Keyboard workaround: select the file and press `Shift+F10`.
+扫描器没找到任何句柄，`DELETE` 权限也有，删除却失败了。常见原因：
 
----
-
-## The menu entry is there but does nothing
-
-The verb launches
-`%LOCALAPPDATA%\Programs\UnlockKit\UnlockKit.exe`. Check that the file exists —
-if the app was moved or deleted without removing the menu first, the entry
-becomes a dead link. Re-run the app and click **Install context menu** twice
-(remove, then install) to rewrite the paths.
+- **路径过长。** 超过 `MAX_PATH`（260）又没有 `\\?\` 前缀。UnlockKit 内部用的是扩展长度形式，但调用方可能不是。
+- **问题在父目录**，不在这个文件：只读、ACL、或者一个重解析点。删除在父目录上失败，报错却指向子项。
+- **目标在扫描和删除之间被移动了。** 重跑一次。
+- **过滤驱动**让删除失败而不是让打开失败 —— 这会表现为一个意料之外的 `NTSTATUS`，值得带 `--json -v` 报上来。
 
 ---
 
-## Reporting a bug
+## 右键项出现在「显示更多选项」里
+
+Windows 11 上这是预期行为。UnlockKit 写的是传统注册表菜单项；Windows 11 的一级菜单只接受带应用标识的 MSIX 打包 `IExplorerCommand`。键盘绕法：选中文件按 `Shift+F10`。
+
+---
+
+## 菜单项在，但点了没反应
+
+这个菜单项启动的是 `%LOCALAPPDATA%\Programs\UnlockKit\UnlockKit.exe`。确认这个文件还在 —— 如果程序被移动或删除时没先移除菜单，这个项就成了死链接。重新运行程序，把 **Install context menu** 点两次（先移除，再安装）即可重写路径。
+
+---
+
+## 报 bug
 
 ```console
 unlockkit-cli "path" --json -v > report.json
 ```
 
-Include:
+请附上：
 
-- Windows version (`winver`),
-- whether the window was elevated,
-- the verdict line,
-- what you expected instead.
+- Windows 版本（`winver`）；
+- 窗口是否以管理员身份运行；
+- 结论文本；
+- 你期望的结果。
 
-Never paste a report that contains paths you consider private — the JSON includes
-resolved paths for subtree matches.
+不要把包含隐私路径的报告贴出来 —— 子树匹配的 JSON 里会带真实路径。

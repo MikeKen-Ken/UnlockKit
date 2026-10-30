@@ -1,197 +1,129 @@
-# Design
+**简体中文** · [English](DESIGN.en.md)
 
-This document explains *why* UnlockKit does each thing the way it does. Every
-mechanism below exists because a simpler one failed, usually in a way that
-crashed a machine or produced a wrong answer.
+# 设计说明
 
-## 1. The shape of the problem
+本文解释 UnlockKit 为什么这么做。下面每一个机制的存在，都是因为更简单的做法失败过 —— 而且多半是以把机器搞崩、或者给出错误结论的方式失败。
 
-"I can't delete this file" has exactly five causes on Windows:
+## 1. 问题的形状
 
-| Cause | Detectable from user mode? | Fixable from user mode? |
+「删不掉这个文件」在 Windows 上只有五种原因：
+
+| 原因 | 用户态能判定吗？ | 用户态能修吗？ |
 | --- | --- | --- |
-| A process holds a handle without `FILE_SHARE_DELETE` | Yes — enumerate handles | Yes — close the handle |
-| Nothing holds it, the ACL lacks `DELETE` | Yes — try to open with `DELETE` | Yes — change the ACL (not done by default) |
-| A filter driver holds the object | No — only its absence is visible | **No** |
-| The file is a mapped image section (running `.exe`/`.dll`) | Yes — `STATUS_CANNOT_DELETE` | **No** |
-| The holder is a PPL-protected process | Yes — query protection level | **No** |
+| 某进程持有句柄，且没开 `FILE_SHARE_DELETE` | 能 —— 枚举句柄 | 能 —— 关掉句柄 |
+| 没人持有，但 ACL 缺 `DELETE` 权限 | 能 —— 尝试以 `DELETE` 打开 | 能 —— 改 ACL（默认不做） |
+| 过滤驱动持有该对象 | 不能 —— 只能看到它的「不在场」 | **不能** |
+| 文件是已映射的映像节（运行中的 `.exe` / `.dll`） | 能 —— `STATUS_CANNOT_DELETE` | **不能** |
+| 持有者是 PPL 保护进程 | 能 —— 查询保护级别 | **不能** |
 
-A tool that returns `true`/`false` collapses five cases into one bit and is
-therefore wrong about four of them. UnlockKit computes the cause first and
-selects a response from it. That is the entire architecture: **diagnose → act**,
-never act → retry blindly.
+返回 `true`/`false` 的工具把这五种情况压成一个比特，于是四种都答错。UnlockKit 先把原因算出来，再据此选择动作。整个架构就这一句话：**先诊断，再行动**，绝不「先动手再盲目重试」。
 
-## 2. Finding the holder
+## 2. 找到持有者
 
-### Enumerate every handle in the system
+### 枚举全系统的句柄
 
-`NtQuerySystemInformation(SystemExtendedHandleInformation, …)` returns every
-handle in every process, with the owning PID and the granted access mask. This is
-the only complete view: per-process enumeration misses anything that duplicated a
-handle into a child, and `Restart Manager` only covers well-behaved applications
-that registered themselves.
+`NtQuerySystemInformation(SystemExtendedHandleInformation, …)` 会返回每个进程里的每一个句柄，附带所属 PID 和授权访问掩码。这是唯一完整的视角：按进程逐个枚举会漏掉被复制到子进程里的句柄，而「重启管理器」只覆盖那些老实注册过自己的程序。
 
-The buffer size is not documented and races with system activity, so the call is
-retried with a growing buffer on `STATUS_INFO_LENGTH_MISMATCH`.
+缓冲区大小没有文档说明，而且会随系统活动不断变化，所以调用在 `STATUS_INFO_LENGTH_MISMATCH` 时会扩大缓冲区重试（最多 8 次，同时兼顾 `STATUS_BUFFER_TOO_SMALL` / `STATUS_BUFFER_OVERFLOW`，每次至少按 `needed + 64KB` 或翻倍增长）。
 
-### Filter by object type before touching anything
+### 对象类型索引是探出来的，不是写死的
 
-The `File` object type also covers named pipes, mail slots, and character
-devices. `GetFileInformationByHandle` **blocks forever** on a synchronous pipe
-handle — the second the scanner touches one, the tool hangs with no diagnostic.
+每个表项都带一个 `ObjectTypeIndex`。「File」在多数现行版本上恰好是 `25` —— 而这恰恰是不能写死它的原因：类型索引在每次开机时分配，不受任何契约约束。
 
-So: `GetFileType(handle) == FILE_TYPE_DISK` (`1`) is checked first, and anything
-else is skipped. This is not a performance filter, it is the difference between
-working and deadlocking. It also structurally excludes section objects, ALPC
-ports, and desktop objects, which is why the scanner cannot accidentally close
-something that would bugcheck the machine.
+于是扫描器不信任常量，而是新建一个临时文件并打开它，然后去句柄表里找**属于自己 PID 和句柄值**的那一项，从那里读出真实的索引。这个探测失败时，扫描会报「类型索引未知」，而不是静默地匹配到零个句柄、然后宣称文件没被占用。
 
-### Match by identity, not by name
+### 动手之前先按对象类型过滤
 
-Resolving every handle's object name with `NtQueryObject(ObjectNameInformation)`
-is the obvious approach and it is a trap: on some filter drivers it deadlocks,
-and on all of them it is slow (thousands of round-trips through the object
-manager for a single scan).
+`File` 这个对象类型同时也覆盖命名管道、邮件槽和字符设备。而 `GetFileInformationByHandle` 在同步管道句柄上**会永久阻塞** —— 扫描器一旦碰到一个，整个工具就挂死，而且没有任何诊断信息。
 
-Instead each candidate handle is duplicated into this process and asked for its
-**volume serial number + 64-bit file index** via `GetFileInformationByHandle`.
-That pair is the identity of the file on that volume:
+所以第一步是 `GetFileType(handle) == FILE_TYPE_DISK`（即 `1`），不是的一律跳过。这不是性能过滤器，这是「能用」和「死锁」的分界线。它同时从结构上排除了节对象、ALPC 端口和桌面对象 —— 这也是为什么这个扫描器不可能误关一个会导致蓝屏的东西。
 
-- it does not care how the file was opened (`\\?\` prefix, 8.3 name, hardlink,
-  junction, different letter for the same volume);
-- it cannot be spoofed by a path that merely *looks* like the target;
-- it costs one syscall per handle instead of an object-manager walk.
+### 按身份匹配，而不是按名字
 
-Only when the identity does not match, but the *volume* does, and the target is a
-directory, is the path resolved (`GetFinalPathNameByHandle`) and tested for
-containment. Network handles are never queried, because the volume filter rejects
-them first — which is what keeps a subtree scan from stalling on an offline SMB
-share.
+用 `NtQueryObject(ObjectNameInformation)` 把每个句柄的对象名解析出来，是最直觉的做法，也是一个陷阱：在某些过滤驱动上它会死锁，而在所有驱动上都慢（对一次扫描来说，几千次穿过对象管理器的往返）。
 
-### Subtree scanning
+实际做法是把候选句柄复制进本进程，然后用 `GetFileInformationByHandle` 问出它的**卷序列号 + 64 位文件索引**。这一对值就是该文件在那个卷上的身份：
 
-Deleting `D:\archive\ccccc` fails when nothing holds the folder but something
-holds `D:\archive\ccccc\assets\config.json`. The folder cannot be removed while a
-child exists, and the child cannot be removed while it is held.
+- 它不关心文件是怎么被打开的（`\\?\` 前缀、8.3 短名、硬链接、目录联接、同一卷的另一个盘符）；
+- 它不能被一个「长得像」目标的路径骗过；
+- 每个句柄一次系统调用，而不是走一遍对象管理器。
 
-So a directory target switches the scanner into **subtree mode**: every handle on
-the target's volume whose resolved path is prefixed by the target path is a
-match. This is what turns "no locks found, refuses to delete" into
-"`TSVNCache.exe` holds 5 directories inside this folder".
+只有当身份不匹配、但**卷**匹配、且目标是目录时，才会去解析路径（`GetFinalPathNameByHandle`）并做包含判断。网络句柄永远不会被查询，因为卷过滤在它之前就把它们筛掉了 —— 这正是子树扫描不会卡在离线的 SMB 共享上的原因。
 
-## 3. Closing a handle in another process
+### 子树扫描
 
-`DuplicateHandle(sourceProcess, sourceHandle, …, DUPLICATE_CLOSE_SOURCE)` closes
-the source while handing you a copy. It is the only supported way to close
-another process's handle, and it is unforgiving: handle *values* are recycled
-immediately, so a value captured during enumeration may already belong to an
-unrelated object by the time you act on it.
+删 `D:\archive\ccccc` 失败，可能文件夹本身没人占用，但 `D:\archive\ccccc\assets\config.json` 被占着。子文件还在，文件夹就删不掉；子文件被占，子文件也删不掉。
 
-The scanner therefore does it in two steps for every single handle:
+所以目标是目录时，扫描器切到**子树模式**：目标卷上所有解析路径以目标路径为前缀的句柄，都算命中。这一步才把「扫描不到占用，但就是删不掉」变成「`TSVNCache.exe` 占着这个文件夹里 5 个目录」。
 
-1. `DuplicateHandle` **without** `DUPLICATE_CLOSE_SOURCE` → re-run the identity
-   predicate against the copy → close the copy. If the identity no longer holds,
-   the handle was recycled; skip it and count it as *unverified*.
-2. Only after the identity is confirmed, `DuplicateHandle` **with**
-   `DUPLICATE_CLOSE_SOURCE`.
+## 3. 关闭别的进程里的句柄
 
-There is still a gap of microseconds between step 1 and step 2, and there is no
-API to close a remote handle conditionally on the object it points at. That gap
-is documented rather than hidden, and it is why the counter of *unverified*
-handles exists in the report: it is the honest measure of how much the scanner
-could not prove.
+`DuplicateHandle(sourceProcess, sourceHandle, …, DUPLICATE_CLOSE_SOURCE)` 会在把副本交给你的同时关掉源句柄。这是唯一受支持的「关别人句柄」的方式，而且它毫不宽容：句柄**值**会被立刻回收复用，所以枚举时抓到的值，等你去动手时可能已经指向一个毫不相干的对象。
 
-Handles capable of writing (`FILE_WRITE_DATA`, `FILE_APPEND_DATA`) produce a
-warning before being closed, because closing them can lose data the holder never
-flushed.
+因此扫描器对**每一个**句柄都走两步：
 
-## 4. The delete ladder
+1. `DuplicateHandle` **不带** `DUPLICATE_CLOSE_SOURCE` → 对副本重新跑一遍身份判定 → 关掉副本。如果身份不再成立，说明这个句柄已被回收，跳过并计入 *unverified*。
+2. 只有身份确认之后，才用 `DUPLICATE_CLOSE_SOURCE` 正式关闭。
 
-Order is the design. Cheapest and least destructive first, and each rung reports
-itself so the caller can say *why* the fallback happened.
+第 1 步和第 2 步之间仍有微秒级的窗口，而不存在「按对象有条件地关闭远端句柄」这种 API。这个窗口是被写进文档的，而不是被藏起来的 —— 这也正是报告里要单独统计 *unverified* 的原因：它是扫描器「没能证明」的那部分，一个诚实的量化。
+
+有写能力的句柄（`FILE_WRITE_DATA`、`FILE_APPEND_DATA`）在关闭前会产生一条警告，因为关掉它可能丢掉持有者还没落盘的数据。
+
+## 4. 删除阶梯
+
+顺序本身就是设计。最便宜、破坏性最小的先上，而且每一级都会说明自己，让调用方能够解释**为什么**走到了下一步，而不是只报一句「删不掉」。
 
 ```
-1. POSIX delete          NtSetInformationFile(FileDispositionInformationEx)
-                         with FILE_DISPOSITION_POSIX_SEMANTICS
-                         → unlinks the name now; bytes freed when the last
-                           handle closes. Works even while others hold it open,
-                           as long as they allowed FILE_SHARE_DELETE.
-2. Close, then delete    only reached on STATUS_SHARING_VIOLATION, i.e. a holder
-                         that did not allow share-delete.
-3. Recursive tree delete directories only: close the whole subtree in one pass,
-                         then delete files first and directories post-order.
-4. Reboot schedule       MoveFileEx(path, NULL, MOVEFILE_DELAY_UNTIL_REBOOT)
-                         → PendingFileRenameOperations, executed by SMSS before
-                           any user-mode code runs. Opt-in only.
+1. POSIX 删除        NtSetInformationFile(FileDispositionInformationEx)
+                     带 FILE_DISPOSITION_POSIX_SEMANTICS
+                     → 立刻解除文件名链接；字节在最后一个句柄关闭时释放。
+                       只要持有者允许 FILE_SHARE_DELETE，即使别人还开着也能成功。
+2. 先关再删          仅在 STATUS_SHARING_VIOLATION 时进入，
+                     即持有者没允许 share-delete。
+3. 递归树删除        仅目录：一次性关掉整棵子树，然后先删文件、
+                     再按后序删目录。
+4. 排到重启           MoveFileEx(path, NULL, MOVEFILE_DELAY_UNTIL_REBOOT)
+                     → PendingFileRenameOperations，由 SMSS 在任何用户态代码
+                       运行之前执行。需要显式开启。
 ```
 
-Notes on the rungs that matter:
+几处值得说明的地方：
 
-- **`FILE_DISPOSITION_IGNORE_READONLY_ATTRIBUTE`** is set in the same call, so a
-  read-only flag does not need a separate `SetFileAttributes` round-trip that
-  could itself fail.
-- **Rung 3 exists because of watchers.** `TSVNCache.exe`, Search indexers, and
-  cloud sync clients re-open directory handles within milliseconds of losing
-  them. Deleting file-by-file with retries loses that race forever; closing the
-  entire subtree once and then deleting bottom-up finishes in ~1.7 s on a
-  five-directory tree that had been "undeletable" for weeks.
-- **Rung 4 is never automatic** in the CLI; it needs `--reboot`. Scheduling a
-  delete that the user did not ask for is a surprising side effect, and it
-  survives the session that requested it.
-- **Junctions and symlinks are deleted as links**, never recursed into. A
-  directory junction loop otherwise walks until the stack dies.
+- **`FILE_DISPOSITION_IGNORE_READONLY_ATTRIBUTE`** 在同一次调用里一起给出，所以只读属性不需要额外一次 `SetFileAttributes` 往返 —— 而那次往返本身也可能失败。
+- **第 3 级是为监视器准备的。** `TSVNCache.exe`、搜索索引器、云同步客户端会在丢掉目录句柄后的毫秒内重新打开。逐个文件带重试地删，永远输掉这场竞速；一次性关掉整棵子树、再自底向上删，能用一个本来「几周都删不掉」的五目录树在约 1.7 秒内结束。
+- **第 4 级在 CLI 里永远不会自动触发**，必须显式 `--reboot`。安排一次用户没要求的删除是个意外的副作用，而且它会活过发起请求的那个会话。
+- **目录联接和符号链接只删链接本身**，绝不递归进去。否则一个目录环路会一直走到栈耗尽。
 
-## 5. Safety policy
+## 5. 安全策略
 
-Closing a handle in a process that does not expect it can range from harmless to
-a bugcheck. Rather than judge case by case, a fixed deny-list is applied by
-process name, plus PID 0/4:
+在一个没准备好的进程里关句柄，后果可以从「无所谓」一路到蓝屏。与其逐个判断，不如按进程名走一份固定的拒绝名单，外加 PID 0/4：
 
-`System`, `Idle`, `Registry`, `smss`, `csrss`, `wininit`, `winlogon`, `services`,
-`lsass`, `lsaiso`, `MemCompression`, `MsMpEng`
+`System`、`Idle`、`Registry`、`smss`、`csrss`、`wininit`、`winlogon`、`services`、`lsass`、`lsaiso`、`MemCompression`、`MsMpEng`
 
-PPL-protected processes are refused as well — not out of politeness, but because
-`OpenProcess` cannot succeed against them even with `SeDebugPrivilege`, so
-attempting it produces a misleading "access denied" instead of the true reason.
+PPL 保护的进程同样拒绝 —— 不是出于客气，而是因为 `OpenProcess` 对它们即使有 `SeDebugPrivilege` 也不可能成功，硬试只会得到一个误导性的「拒绝访问」，而不是真正的原因。
 
-The policy is deliberately not configurable. A flag to override it would be used,
-and the failure mode is a machine that no longer boots.
+这份策略故意做成不可配置。一个能覆盖它的开关一定会被用上，而失败模式是一台开不了机的电脑。
 
-## 6. Elevation and privileges
+## 6. 提权与特权
 
-`SeDebugPrivilege` is enabled at startup (`AdjustTokenPrivileges` on the current
-process token); without it, handles in processes owned by other users are
-unreadable and the report says so via the *unreadable* counter rather than
-silently returning "not locked".
+启动时会启用 `SeDebugPrivilege`（对当前进程令牌做 `AdjustTokenPrivileges`）；没有它，属于其他用户的进程里的句柄读不到，报告会通过 *unreadable* 计数如实反映，而不是悄悄返回「没被占用」。
 
-Elevation is not demanded up front. Most single-user cases (a watcher in your own
-session) work unelevated; the window offers *Restart as administrator* when the
-scan shows handles it could not open.
+它也不会一上来就要求管理员。多数单用户场景（自己会话里的一个监视器）不提权就能解决；只有在扫描结果显示有读不到的句柄时，窗口才提供 *Restart as administrator*。
 
-## 7. Shell integration
+## 7. Shell 集成
 
-One `HKCU` parent verb per scope (`*` and `Directory`), pointing at a cascade
-definition through `ExtendedSubCommandsKey`. The parent carries `MUIVerb` and
-`Icon`, and deliberately has **no** `SubCommands` value and **no** `command`
-subkey — either one would replace the cascade with a plain verb or an explicit
-list.
+每个作用域（`*` 和 `Directory`）写一个 `HKCU` 父项，通过 `ExtendedSubCommandsKey` 指向级联定义。父项带 `MUIVerb` 和 `Icon`，并且**故意**不带 `SubCommands` 值、也不带 `command` 子键 —— 任何一个都会把级联替换成一个普通菜单项或者一份显式列表。
 
-Children (`Unlock`, `Delete`) are read from the definition key's `shell` subkey.
-Their captions come from `MUIVerb`; the default value is written too so the same
-key remains correct if a host reads it as a plain verb. Each child gets its own
-`.ico` extracted next to the executable, because 16-pixel menu icons are the only
-thing distinguishing two similar verbs.
+子项（`Unlock`、`Delete`）从定义键的 `shell` 子键读取。它们的标题来自 `MUIVerb`；默认值也一并写上，这样同一个键在被当作普通菜单项读取时依然正确。每个子项都带自己的 `.ico`，在安装时解压到可执行文件旁边 —— 因为在 16 像素下，图标是两个相似菜单项之间唯一的区别。
 
-Everything is per-user. No elevation, no `HKLM`, no uninstaller required: the
-window's *Remove context menu* deletes the same keys it created, plus the flat
-verb names used by earlier builds.
+全部只写当前用户。不需要提权、不碰 `HKLM`、不需要卸载程序：窗口里的 *Remove context menu* 删的就是它自己创建的那些键，外加早期版本用过的平铺菜单名。
 
-## 8. Known trade-offs
+## 8. 已知取舍
 
-| Trade-off | Why it is accepted |
+| 取舍 | 为什么接受 |
 | --- | --- |
-| Reboot path requires an explicit flag | Surviving the session is a side effect the user must choose |
-| TOCTOU window between verify and close | No conditional-close API exists; the alternative (close blind) can hit the wrong object |
-| No ACL repair | Silently rewriting permissions on a user's files is a bigger change than the problem it solves; the diagnosis names the cause instead |
-| No kernel driver | User-mode only means no signing, no BSOD risk, and no antivirus fight — at the cost of never beating a minifilter |
-| Legacy registry verbs on Windows 11 | Sitting under *Show more options* is the price of not shipping an MSIX package |
+| 重启删除需要显式开关 | 「活过这个会话」是个必须由用户选择的副作用 |
+| 校验与关闭之间存在 TOCTOU 窗口 | 不存在有条件关闭的 API；另一个选项（盲关）可能打到错误的对象 |
+| 不做 ACL 修复 | 背地里改写用户文件的权限，比它要解决的问题更大；诊断把原因指出来就够了 |
+| 不做内核驱动 | 纯用户态意味着不用签名、不可能蓝屏、不用和杀软打架 —— 代价是永远赢不了 minifilter |
+| Windows 11 上仍是传统注册表菜单项 | 待在「显示更多选项」里，是不做 MSIX 打包的代价 |

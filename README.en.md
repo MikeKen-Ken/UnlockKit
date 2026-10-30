@@ -156,17 +156,21 @@ src/
     Actions/            POSIX delete, handle closing, recursive tree delete
   UnlockKit.UI/         WPF front end, per-user shell integration, self-installer
 docs/
-  DESIGN.md             why each mechanism exists, and what it costs
-  TROUBLESHOOTING.md    failure taxonomy — read this before filing an issue
+  DESIGN.md             design notes (Chinese)
+  DESIGN.en.md          design notes (English)
+  TROUBLESHOOTING.md    failure taxonomy (Chinese)
+  TROUBLESHOOTING.en.md failure taxonomy (English)
 assets/                 icon source
 ```
 
 ## Documentation
 
-- **[docs/DESIGN.md](docs/DESIGN.md)** — the handle scanner, identity matching, the delete ladder, and the TOCTOU trade-offs.
-- **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)** — "I still can't delete it." Organised by the error you're seeing.
+Both docs exist in both languages:
 
-Reading in Chinese? The [Chinese README](README.md) covers the same ground.
+- **[docs/DESIGN.en.md](docs/DESIGN.en.md)** — the handle scanner, identity matching, the delete ladder, and the TOCTOU trade-offs.
+- **[docs/TROUBLESHOOTING.en.md](docs/TROUBLESHOOTING.en.md)** — "I still can't delete it." Organised by the error you're seeing.
+
+Chinese versions: [DESIGN.md](docs/DESIGN.md) / [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md). The [Chinese README](README.md) covers the same ground as this page.
 
 ## License
 

@@ -159,16 +159,20 @@ src/
   UnlockKit.UI/         WPF 前端、用户级 shell 集成、自安装
 docs/
   DESIGN.md             每个机制为什么存在，代价是什么
+  DESIGN.en.md          同上（英文）
   TROUBLESHOOTING.md    故障分类手册 —— 提 issue 前先看这个
+  TROUBLESHOOTING.en.md 同上（英文）
 assets/                 图标源文件
 ```
 
 ## 文档
 
-技术文档目前是英文（README 及其配套说明除外）：
+文档和 README 一样是双语的：
 
 - **[docs/DESIGN.md](docs/DESIGN.md)** —— 句柄扫描、身份匹配、删除阶梯，以及 TOCTOU 上的取舍。
 - **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)** —— 「我还是删不掉」。按你看到的报错组织。
+
+英文版见 [DESIGN.en.md](docs/DESIGN.en.md) / [TROUBLESHOOTING.en.md](docs/TROUBLESHOOTING.en.md)。
 
 ## 许可证
 
