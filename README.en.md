@@ -22,6 +22,15 @@
 
 ---
 
+<p align="center">
+  <img src="assets/screenshots/light.png" width="410" alt="UnlockKit, light theme">
+  <img src="assets/screenshots/dark.png" width="410" alt="UnlockKit, dark theme">
+  <br>
+  <sub>Light / dark — a real scan: <code>explorer.exe</code> and <code>TSVNCache.exe</code> holding 7 files inside <code>D:\archive\cc1</code></sub>
+</p>
+
+---
+
 ## The problem
 
 You try to delete a folder and Windows says one of these:
@@ -43,6 +52,7 @@ UnlockKit answers with a diagnosis first. It enumerates every open handle in the
 - **Ends the process** as a last resort, and reports honestly when it can't (`PPL`, zombie, access denied).
 - **Schedules the delete for next boot** through `PendingFileRenameOperations` when the lock genuinely can't be broken from user mode.
 - **Right-click integration** — one `UnlockKit` entry with `Unlock` and `Delete` children, icons included, installed per-user so it never needs elevation.
+- **Light and dark themes** — follows Windows on first run, one click in the bottom-right corner to switch, right-click that switch for *Follow Windows*. The choice is stored in `HKCU\Software\UnlockKit`, and the title bar goes dark too, so there is no white frame around a black window.
 
 ## Install
 
@@ -155,12 +165,13 @@ src/
     Core/               scanner, process probing, path mapping, safety policy
     Actions/            POSIX delete, handle closing, recursive tree delete
   UnlockKit.UI/         WPF front end, per-user shell integration, self-installer
+    Themes/             light and dark colour dictionaries, plus every control style
 docs/
   DESIGN.md             design notes (Chinese)
   DESIGN.en.md          design notes (English)
   TROUBLESHOOTING.md    failure taxonomy (Chinese)
   TROUBLESHOOTING.en.md failure taxonomy (English)
-assets/                 icon source
+assets/                 icon and screenshot sources
 ```
 
 ## Documentation

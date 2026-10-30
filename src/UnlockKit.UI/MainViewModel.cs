@@ -24,10 +24,14 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public ICommand KillCommand { get; }
     public ICommand MenuCommand { get; }
     public ICommand ElevateCommand { get; }
+    public ICommand ThemeCommand { get; }
+    public ICommand ThemeLightCommand { get; }
+    public ICommand ThemeDarkCommand { get; }
+    public ICommand ThemeSystemCommand { get; }
 
     private string _targetPath = "";
     private string _verdict = "Pick a file or folder, then click Scan";
-    private Brush _verdictBrush = Brushes.Gray;
+    private string _verdictLevel = "neutral";
     private string _status = "Ready";
     private string _logText = "";
     private bool _isBusy;
@@ -42,6 +46,21 @@ public sealed class MainViewModel : INotifyPropertyChanged
         KillCommand = new RelayCommand(async () => await KillAsync(), () => !IsBusy && Lockers.Count > 0);
         MenuCommand = new RelayCommand(() => ToggleMenu());
         ElevateCommand = new RelayCommand(() => Elevate(), () => !Installer.IsElevated());
+
+        ThemeCommand = new RelayCommand(Theme.Toggle);
+        ThemeLightCommand = new RelayCommand(() => Theme.Set(ThemeKind.Light));
+        ThemeDarkCommand = new RelayCommand(() => Theme.Set(ThemeKind.Dark));
+        ThemeSystemCommand = new RelayCommand(() => Theme.Set(ThemeKind.System));
+
+        // A theme swap replaces the brush objects, so anything the view model
+        // cached has to be re-announced.
+        Theme.Changed += (_, _) =>
+        {
+            OnChanged(nameof(ThemeLabel));
+            OnChanged(nameof(ThemeGlyph));
+            OnChanged(nameof(ThemeTip));
+            OnChanged(nameof(VerdictBrush));
+        };
 
         _menuInstalled = ShellIntegration.IsInstalled();
 
@@ -71,11 +90,13 @@ public sealed class MainViewModel : INotifyPropertyChanged
         private set { _verdict = value; OnChanged(); }
     }
 
-    public Brush VerdictBrush
+    public Brush VerdictBrush => Theme.Brush(_verdictLevel switch
     {
-        get => _verdictBrush;
-        private set { _verdictBrush = value; OnChanged(); }
-    }
+        "ok" => "Verdict.Ok",
+        "warn" => "Verdict.Warn",
+        "bad" => "Verdict.Bad",
+        _ => "Verdict.Neutral",
+    });
 
     public string Status
     {
@@ -104,6 +125,24 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public string MenuCaption => MenuInstalled ? "Remove context menu" : "Install context menu";
     public string ElevationHint => Installer.IsElevated() ? "Administrator" : "Standard user";
 
+    // Segoe MDL2 glyphs: E706 is a sun, E708 a moon.
+    public string ThemeGlyph => Theme.IsDark ? "\uE708" : "\uE706";
+    public string ThemeLabel => Theme.IsDark ? "Dark" : "Light";
+
+    public string ThemeTip => Theme.Preference switch
+    {
+        ThemeKind.System => $"Following Windows ({(Theme.IsDark ? "dark" : "light")}) — click to override",
+        ThemeKind.Dark => "Dark theme — click to switch to light",
+        _ => "Light theme — click to switch to dark",
+    };
+
+    private void SetVerdict(string text, string level)
+    {
+        Verdict = text;
+        _verdictLevel = level;
+        OnChanged(nameof(VerdictBrush));
+    }
+
     private async Task ScanAsync()
     {
         var path = ValidatePath();
@@ -117,17 +156,19 @@ public sealed class MainViewModel : INotifyPropertyChanged
             var d = await Task.Run(() => Report.Diagnose(path));
             Apply(d);
 
+            // The log prepends, so the summary is written last to land on top —
+            // it is the line worth reading, and the detail lines follow it.
+            if (d.Scan.SubtreeScan)
+                foreach (var p in d.Scan.DistinctPaths.Take(5).Reverse())
+                    Log("  holds: " + p);
+
             var names = ProcessNames(d);
             Log($"Scan: {d.Scan.Handles.Count} handle(s) across {d.Scan.ByProcess.Count()} process(es)" +
                 (names.Length > 0 ? $": {names}" : ""));
-            if (d.Scan.SubtreeScan)
-                foreach (var p in d.Scan.DistinctPaths.Take(6))
-                    Log("  holds: " + p);
         }
         catch (Exception ex)
         {
-            Verdict = "Scan failed";
-            VerdictBrush = Brushes.OrangeRed;
+            SetVerdict("Scan failed", "bad");
             Log("Error: " + ex.Message);
         }
         finally
@@ -172,13 +213,14 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
 
         var names = ProcessNames(d);
-        Verdict = names.Length == 0 || d.Verdict.StartsWith("NOT LOCKED")
+        var text = names.Length == 0 || d.Verdict.StartsWith("NOT LOCKED")
             ? d.Verdict
             : $"{d.Verdict}   [{names}]";
 
-        VerdictBrush = d.Verdict.StartsWith("NOT LOCKED") ? Brushes.SeaGreen
-            : d.Verdict.StartsWith("LOCKED but") ? Brushes.DarkOrange
-            : Brushes.Firebrick;
+        SetVerdict(text,
+            d.Verdict.StartsWith("NOT LOCKED") ? "ok"
+            : d.Verdict.StartsWith("LOCKED but") ? "warn"
+            : "bad");
 
         if (d.Scan.UnreadableHandles > 0)
             Log($"{d.Scan.UnreadableHandles} handle(s) unreadable - restart as administrator to see every process");
@@ -326,16 +368,14 @@ public sealed class MainViewModel : INotifyPropertyChanged
     {
         if (string.IsNullOrWhiteSpace(TargetPath))
         {
-            Verdict = "Enter a path first";
-            VerdictBrush = Brushes.Firebrick;
+            SetVerdict("Enter a path first", "bad");
             return null;
         }
 
         var full = Path.GetFullPath(TargetPath.Trim().Trim('"'));
         if (!File.Exists(full) && !Directory.Exists(full))
         {
-            Verdict = "Path does not exist";
-            VerdictBrush = Brushes.Firebrick;
+            SetVerdict("Path does not exist", "bad");
             return null;
         }
         return full;

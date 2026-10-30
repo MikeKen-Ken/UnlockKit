@@ -1,4 +1,5 @@
 using System.Windows;
+using UnlockKit.UI.Services;
 
 namespace UnlockKit.UI;
 
@@ -10,6 +11,13 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         DataContext = _vm;
+    }
+
+    /// <summary>The frame belongs to DWM, so it needs the dark hint once the HWND exists.</summary>
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+        Theme.Attach(this);
     }
 
     private void BrowseFile(object sender, RoutedEventArgs e)

@@ -198,7 +198,35 @@ Everything is per-user. No elevation, no `HKLM`, no uninstaller required: the
 window's *Remove context menu* deletes the same keys it created, plus the flat
 verb names used by earlier builds.
 
-## 8. Known trade-offs
+## 8. Themes
+
+Light and dark are not two windows; they are two colour dictionaries. Every
+style lives in `Themes/Controls.xaml` and every colour reference in it is a
+`DynamicResource`; `Themes/Light.xaml` and `Dark.xaml` each declare the same set
+of keys and nothing else. Switching replaces the single entry at
+`Application.Resources.MergedDictionaries[0]` — no control is rebuilt, so scroll
+position, row selection and a log that is still being appended all survive.
+
+There is one trap: merged dictionaries resolve **last to first**, so a newly
+inserted dictionary at index 0 would lose to the light dictionary still sitting
+at index 1. The entry has to be replaced in place, not added.
+
+Two things styles cannot reach:
+
+- **The title bar belongs to DWM, not WPF.** A dark client area with a white
+  frame looks broken. `DwmSetWindowAttribute(DWMWA_USE_IMMERSIVE_DARK_MODE)`
+  tells DWM; the attribute number moved from 19 to 20 around Windows 10 20H1, so
+  both are attempted.
+- **Scroll bars.** The stock WPF scroll bar is a light grey slider that reads as
+  a foreign object in a dark window. Both themes share one 11-pixel, arrow-less
+  scroll bar driven by the same colour keys.
+
+First run follows the system (`AppsUseLightTheme`). An explicit choice is
+written to `HKCU\Software\UnlockKit\Theme` and stops the following; right-click
+on the switch to go back to *Follow Windows*. The choice lives in the registry
+rather than a config file because the app already owns a key there.
+
+## 9. Known trade-offs
 
 | Trade-off | Why it is accepted |
 | --- | --- |

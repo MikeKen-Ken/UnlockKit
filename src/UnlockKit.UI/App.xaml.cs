@@ -15,6 +15,10 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
+        // Before the window exists, so it is painted in the right colours from
+        // its first frame instead of flashing white.
+        Theme.Initialize();
+
         // Headless menu maintenance, so installers and scripts can wire the
         // shell up without going through the window.
         var installMenu = false;
@@ -29,7 +33,9 @@ public partial class App : Application
             else if (string.Equals(arg, "--remove-menu", StringComparison.OrdinalIgnoreCase))
                 removeMenu = true;
             else if (!arg.StartsWith('-'))
-                InitialPath = arg;
+                // Explorer and other shells hand us native separators, but paths
+                // pasted from WSL, Node or a URL arrive with forward slashes.
+                InitialPath = arg.Replace('/', '\\');
         }
 
         if (installMenu || removeMenu)

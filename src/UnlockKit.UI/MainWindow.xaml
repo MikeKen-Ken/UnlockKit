@@ -4,115 +4,12 @@
         Title="UnlockKit" Width="820" Height="620"
         MinWidth="680" MinHeight="500"
         Icon="Assets/unlockkit.ico"
-        Background="#F5F6FA"
+        Background="{DynamicResource Window.Background}"
+        Foreground="{DynamicResource Text}"
         FontFamily="Segoe UI Variable Text, Segoe UI" FontSize="13">
-    <Window.Resources>
-        <!-- base button: flat, rounded, subtle border -->
-        <Style x:Key="Btn" TargetType="Button">
-            <Setter Property="Background" Value="#FFFFFF"/>
-            <Setter Property="Foreground" Value="#1F2430"/>
-            <Setter Property="BorderBrush" Value="#D5DAE5"/>
-            <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="Padding" Value="14,7"/>
-            <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border x:Name="bd"
-                                Background="{TemplateBinding Background}"
-                                BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="6"
-                                Padding="{TemplateBinding Padding}">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="bd" Property="Background" Value="#DDE2EE"/>
-                            </Trigger>
-                            <Trigger Property="IsEnabled" Value="False">
-                                <Setter TargetName="bd" Property="Opacity" Value="0.45"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-            <Style.Triggers>
-                <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="#EEF0F7"/>
-                </Trigger>
-            </Style.Triggers>
-        </Style>
 
-        <Style x:Key="BtnPrimary" TargetType="Button" BasedOn="{StaticResource Btn}">
-            <Setter Property="Background" Value="#4F46E5"/>
-            <Setter Property="Foreground" Value="#FFFFFF"/>
-            <Setter Property="BorderBrush" Value="#4F46E5"/>
-            <Style.Triggers>
-                <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="#4338CA"/>
-                </Trigger>
-            </Style.Triggers>
-        </Style>
-
-        <Style x:Key="BtnDanger" TargetType="Button" BasedOn="{StaticResource Btn}">
-            <Setter Property="Background" Value="#DC2626"/>
-            <Setter Property="Foreground" Value="#FFFFFF"/>
-            <Setter Property="BorderBrush" Value="#DC2626"/>
-            <Style.Triggers>
-                <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="#B91C1C"/>
-                </Trigger>
-            </Style.Triggers>
-        </Style>
-
-        <!-- path input -->
-        <Style x:Key="Input" TargetType="TextBox">
-            <Setter Property="Padding" Value="10,7"/>
-            <Setter Property="VerticalContentAlignment" Value="Center"/>
-            <Setter Property="Background" Value="#FFFFFF"/>
-            <Setter Property="BorderBrush" Value="#D5DAE5"/>
-            <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="TextBox">
-                        <Border Background="{TemplateBinding Background}"
-                                BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="6"
-                                Padding="{TemplateBinding Padding}">
-                            <ScrollViewer x:Name="PART_ContentHost"/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsKeyboardFocusWithin" Value="True">
-                                <Setter Property="BorderBrush" Value="#4F46E5"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
-        <!-- clean data grid -->
-        <Style x:Key="GridCell" TargetType="DataGridCell">
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Padding" Value="8,4"/>
-            <Style.Triggers>
-                <Trigger Property="IsSelected" Value="True">
-                    <Setter Property="Background" Value="#EEF0F7"/>
-                    <Setter Property="Foreground" Value="#1F2430"/>
-                </Trigger>
-            </Style.Triggers>
-        </Style>
-        <Style x:Key="GridHeader" TargetType="DataGridColumnHeader">
-            <Setter Property="Background" Value="#F1F3F9"/>
-            <Setter Property="Foreground" Value="#4B5563"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="Padding" Value="8,7"/>
-            <Setter Property="BorderThickness" Value="0,0,0,1"/>
-            <Setter Property="BorderBrush" Value="#E2E6F0"/>
-        </Style>
-    </Window.Resources>
+    <!-- No styles here: Themes/Controls.xaml owns them all, which is what lets
+         the light/dark switch work without touching this file. -->
 
     <Grid Margin="14">
         <Grid.RowDefinitions>
@@ -136,7 +33,8 @@
         </DockPanel>
 
         <!-- verdict banner -->
-        <Border Grid.Row="1" Background="#FFFFFF" BorderBrush="#E2E6F0" BorderThickness="1"
+        <Border Grid.Row="1" Background="{DynamicResource Surface}"
+                BorderBrush="{DynamicResource Border}" BorderThickness="1"
                 CornerRadius="6" Padding="12,9" Margin="0,0,0,10">
             <DockPanel>
                 <Border DockPanel.Dock="Left" Width="4" CornerRadius="2"
@@ -151,12 +49,16 @@
         <DataGrid Grid.Row="2" ItemsSource="{Binding Lockers}"
                   AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False"
                   HeadersVisibility="Column" GridLinesVisibility="None"
-                  RowBackground="#FFFFFF" AlternatingRowBackground="#FAFBFD"
-                  Background="#FFFFFF" BorderBrush="#E2E6F0" BorderThickness="1"
-                  HorizontalGridLinesBrush="#F1F3F9"
+                  RowBackground="{DynamicResource Surface}"
+                  AlternatingRowBackground="{DynamicResource Surface.Alt}"
+                  Background="{DynamicResource Surface}"
+                  Foreground="{DynamicResource Text}"
+                  BorderBrush="{DynamicResource Border}" BorderThickness="1"
+                  HorizontalGridLinesBrush="{DynamicResource Border}"
                   SelectionMode="Single" SelectionUnit="FullRow"
                   ColumnHeaderStyle="{StaticResource GridHeader}"
-                  CellStyle="{StaticResource GridCell}">
+                  CellStyle="{StaticResource GridCell}"
+                  RowStyle="{StaticResource GridRow}">
             <DataGrid.Columns>
                 <DataGridTextColumn Header="Process" Binding="{Binding Name}" Width="*"/>
                 <DataGridTextColumn Header="PID" Binding="{Binding Pid}" Width="70"/>
@@ -196,8 +98,29 @@
 
         <!-- status bar -->
         <DockPanel Grid.Row="6" Margin="0,8,0,0">
-            <TextBlock Text="{Binding ElevationHint}" DockPanel.Dock="Right" Foreground="#6B7280"/>
-            <TextBlock Text="{Binding Status}" Foreground="#6B7280"/>
+            <Button DockPanel.Dock="Right" Style="{StaticResource BtnGhost}" Margin="10,0,0,0"
+                    Command="{Binding ThemeCommand}" ToolTip="{Binding ThemeTip}">
+                <Button.ContextMenu>
+                    <ContextMenu DataContext="{Binding PlacementTarget.DataContext,
+                                               RelativeSource={RelativeSource Self}}">
+                        <MenuItem Header="Light" Command="{Binding ThemeLightCommand}"/>
+                        <MenuItem Header="Dark" Command="{Binding ThemeDarkCommand}"/>
+                        <Separator/>
+                        <MenuItem Header="Follow Windows" Command="{Binding ThemeSystemCommand}"/>
+                    </ContextMenu>
+                </Button.ContextMenu>
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="{Binding ThemeGlyph}" Margin="0,0,6,0"
+                               FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                               FontSize="13" VerticalAlignment="Center"/>
+                    <TextBlock Text="{Binding ThemeLabel}" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Button>
+
+            <TextBlock Text="{Binding ElevationHint}" DockPanel.Dock="Right"
+                       Foreground="{DynamicResource Text.Muted}" VerticalAlignment="Center"/>
+            <TextBlock Text="{Binding Status}" Foreground="{DynamicResource Text.Muted}"
+                       VerticalAlignment="Center"/>
         </DockPanel>
     </Grid>
 </Window>

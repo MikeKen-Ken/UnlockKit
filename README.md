@@ -22,6 +22,15 @@
 
 ---
 
+<p align="center">
+  <img src="assets/screenshots/light.png" width="410" alt="UnlockKit 浅色界面">
+  <img src="assets/screenshots/dark.png" width="410" alt="UnlockKit 深色界面">
+  <br>
+  <sub>浅色 / 深色 —— 这是一次真实扫描：<code>explorer.exe</code> 和 <code>TSVNCache.exe</code> 占着 <code>D:\archive\cc1</code> 里的 7 个文件</sub>
+</p>
+
+---
+
 ## 问题出在哪
 
 你想删一个文件夹，Windows 只回你一句：
@@ -43,6 +52,7 @@ UnlockKit 先给诊断，再动手。它枚举全系统打开的文件句柄，�
 - **结束进程**作为最后手段，并且做不到时如实说明（`PPL`、僵尸进程、权限不足）。
 - **安排重启时删除** —— 当这个锁从用户态确实破不了，就通过 `PendingFileRenameOperations` 交给下次开机，在 `SMSS` 阶段执行。
 - **右键集成** —— 一个 `UnlockKit` 父项，下挂 `Unlock` 和 `Delete`，各带图标；只写当前用户，全程不需要管理员权限。
+- **深色模式** —— 首次启动跟随系统（任务栏里的浅色/深色），右下角一键切换，右键那个开关可以选「跟随 Windows」；选择存在 `HKCU\Software\UnlockKit`，标题栏也一起变深，不会出现白色边框配黑窗口。
 
 ## 安装
 
@@ -157,12 +167,13 @@ src/
     Core/               扫描器、进程探测、路径映射、安全策略
     Actions/            POSIX 删除、句柄关闭、递归树删除
   UnlockKit.UI/         WPF 前端、用户级 shell 集成、自安装
+    Themes/             浅色 / 深色两套颜色字典 + 全部控件样式
 docs/
   DESIGN.md             每个机制为什么存在，代价是什么
   DESIGN.en.md          同上（英文）
   TROUBLESHOOTING.md    故障分类手册 —— 提 issue 前先看这个
   TROUBLESHOOTING.en.md 同上（英文）
-assets/                 图标源文件
+assets/                 图标与截图源文件
 ```
 
 ## 文档
